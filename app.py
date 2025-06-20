@@ -3,31 +3,34 @@ import pandas as pd
 import plotly.express as px
 import re
 
-st.set_page_config(page_title="Studie Copilot/ChatGPT", layout="wide", initial_sidebar_state="expanded")
-FONT = dict(family="Arial", size=12)
+st.set_page_config(
+    page_title="Studie zum Thema 'Bewertung der Effizienz des Copilot (ChatGPT) - Einsatzes in der betrieblichen Anwendungsentwicklung durchgeführt' von Erdinc Gürsoy",
+    initial_sidebar_state="expanded"
+)
 
+FONT = dict(family="Arial", size=12)
 CSV_PATH = "Bewertung_der_Effizienz_des_Copilot__ChatGPT___Einsatzes_in_der__betrieblichen_Anwendungsentwicklung.csv"
 df_orig = pd.read_csv(CSV_PATH)
 
 st.sidebar.header("Filter")
 teil_ids = df_orig["Teilnehmer"].unique().tolist()
-teil_sel = st.sidebar.selectbox("Teilnehmer anzeigen", ["Alle"] + teil_ids)
+teil_sel = st.sidebar.selectbox("Teilnehmer", ["Alle"] + teil_ids)
 
 exp_map = {
     "< 2 Jahre": [c for c in df_orig.columns if "Weniger als 2 Jahre" in c][0],
     "2–5 Jahre": [c for c in df_orig.columns if "2 bis 5 Jahre" in c][0],
     "> 5 Jahre": [c for c in df_orig.columns if "Mehr als 5 Jahre" in c][0],
 }
-exp_sel = st.sidebar.multiselect("Berufserfahrung", list(exp_map.keys()), default=list(exp_map.keys()))
+exp_sel = st.sidebar.multiselect("Berufserfahrung (Jahre)", list(exp_map.keys()), default=list(exp_map.keys()))
 
 since_col = [c for c in df_orig.columns if "Seit wann nutzt du GitHub Copilot" in c][0]
-since_sel = st.sidebar.multiselect("Seit wann nutzt du Copilot/ChatGPT?", sorted(df_orig[since_col].dropna().unique()), default=sorted(df_orig[since_col].dropna().unique()))
+since_sel = st.sidebar.multiselect("Länge der Nutzung von Copilot/ChatGPT", sorted(df_orig[since_col].dropna().unique()), default=sorted(df_orig[since_col].dropna().unique()))
 
 freq_col = [c for c in df_orig.columns if "Wie häufig nutzt du GitHub Copilot" in c][0]
-freq_sel = st.sidebar.multiselect("Wie häufig nutzt du Copilot/ChatGPT?", sorted(df_orig[freq_col].dropna().unique()), default=sorted(df_orig[freq_col].dropna().unique()))
+freq_sel = st.sidebar.multiselect("Nutzungsfrequenz Copilot/ChatGPT", sorted(df_orig[freq_col].dropna().unique()), default=sorted(df_orig[freq_col].dropna().unique()))
 
 rate_col = [c for c in df_orig.columns if "Wie bewertest du insgesamt" in c][0]
-rate_sel = st.sidebar.multiselect("Gesamtbewertung", sorted(df_orig[rate_col].dropna().unique()), default=sorted(df_orig[rate_col].dropna().unique()))
+rate_sel = st.sidebar.multiselect("Gesamtbewertung Copilot", sorted(df_orig[rate_col].dropna().unique()), default=sorted(df_orig[rate_col].dropna().unique()))
 
 df = df_orig.copy()
 if teil_sel != "Alle":
@@ -51,7 +54,7 @@ if df_detail is not None:
     st.json(df_detail.to_dict(orient="records")[0])
     st.stop()
 
-st.title("Studie: Bewertung der Effizienz des Copilot (ChatGPT)")
+st.title("Studie zum Thema 'Bewertung der Effizienz des Copilot (ChatGPT) - Einsatzes in der betrieblichen Anwendungsentwicklung' durchgeführt von Erdinc Gürsoy")
 st.write(f"{len(df)} Antworten nach Filter")
 st.dataframe(df, use_container_width=True)
 
@@ -68,141 +71,207 @@ def clean_label(col: str) -> str:
     m = re.search(r"\(([^)]+)\)", col)
     return m.group(1) if m else col
 
-st.header("Wie viele Jahre Berufserfahrung besitzt du in der Softwareentwicklung?")
-df["_Erfahrung"] = df.apply(lambda r: next(k for k, v in exp_map.items() if r[v] == 1), axis=1)
-order_exp = ["< 2 Jahre", "2–5 Jahre", "> 5 Jahre"]
-exp_counts = df["_Erfahrung"].value_counts().reindex(order_exp).fillna(0)
+def clean_question(q):
+    q = re.sub(r"[\(\[][^)\]]*[\)\]]", "", q)
+    q = re.sub(r"Eigene Kriterien|Freitext", "", q, flags=re.IGNORECASE)
+    q = re.sub(r"\s+", " ", q)
+    q = q.strip(" :-")
+    return q
+
+def format_title(frage):
+    return '<br>'.join([frage[i:i+70] for i in range(0, len(frage), 70)])
+
+def diagram_with_stats(df_lik, frage, positiv_labels=None, negativ_labels=None, is_likert=True, note_map=None):
+    df_lik["Label"] = df_lik["Prozent"] + " (" + df_lik["Absolut"].astype(str) + ")"
+    fig = px.bar(
+        df_lik, x="Antwort", y="Anteil", 
+        text="Label",
+        hover_data={"Absolut": True, "Prozent": True}
+    )
+    fig.update_traces(
+        textfont=dict(size=16, color='white', family="Arial"),
+        hovertemplate="<br>".join([
+            "Absolut=%{customdata[0]}",
+            "Prozent=%{customdata[1]}"
+        ])
+    )
+    fig.update_layout(
+        xaxis_title="",
+        yaxis_tickformat=".0%",
+        font=FONT,
+        title={"text": format_title(frage), "x":0.5, "xanchor": "center", "y": 0.94, "yanchor": "top"},
+        margin={'t': 120}
+    )
+    st.plotly_chart(fig, use_container_width=True)
+    if is_likert and positiv_labels and negativ_labels:
+        pos = df_lik[df_lik["Antwort"].isin(positiv_labels)]["Absolut"].sum()
+        pos_pct = pos / df_lik["Absolut"].sum()
+        neg = df_lik[df_lik["Antwort"].isin(negativ_labels)]["Absolut"].sum()
+        neg_pct = neg / df_lik["Absolut"].sum()
+        st.markdown(
+            f"<b>Positiv (\"Stimme eher zu\" & \"Stimme voll zu\"):</b> {pos} ({pos_pct:.1%}) &nbsp;&nbsp;&nbsp;&nbsp; <b>Negativ (\"Stimme gar nicht zu\" & \"Stimme eher nicht zu\"):</b> {neg} ({neg_pct:.1%})",
+            unsafe_allow_html=True,
+        )
+    if note_map:
+        df_lik["NoteNum"] = df_lik["Antwort"].map(note_map)
+        schnitt = (df_lik["NoteNum"] * df_lik["Absolut"]).sum() / df_lik["Absolut"].sum()
+        st.markdown(f"<b>Notendurchschnitt:</b> {schnitt:.2f}", unsafe_allow_html=True)
+
+positiv_labels = ["Stimme eher zu", "Stimme voll zu"]
+negativ_labels = ["Stimme gar nicht zu", "Stimme eher nicht zu"]
+
+if "_Erfahrung" not in df.columns:
+    df["_Erfahrung"] = df.apply(lambda r: next(k for k, v in exp_map.items() if r[v] == 1), axis=1)
+
+exp_col = [c for c in df.columns if "Berufserfahrung" in c and "Jahre" in c][0]
+frage_exp = clean_question(exp_col)
+exp_counts = df["_Erfahrung"].value_counts().reindex(list(exp_map.keys())).fillna(0)
 df_exp = pd.DataFrame({
-    "Erfahrung": order_exp,
-    "Absolute": exp_counts.values,
+    "Antwort": list(exp_map.keys()),
+    "Absolut": exp_counts.values,
     "Anteil": exp_counts.values / len(df)
 })
-fig_exp = px.bar(df_exp, x="Erfahrung", y="Anteil", text="Absolute", category_orders={"Erfahrung": order_exp})
-fig_exp.update_layout(xaxis_title="", yaxis_tickformat=".0%", font=FONT)
-st.plotly_chart(fig_exp, use_container_width=True)
+df_exp["Prozent"] = (df_exp["Anteil"] * 100).round(1).astype(str) + "%"
+diagram_with_stats(df_exp, frage_exp, is_likert=False)
 
-st.header("Seit wann nutzt du Copilot/ChatGPT?")
 since_counts = df[since_col].value_counts(normalize=True).sort_index()
-df_since = pd.DataFrame({"Kategorie": since_counts.index, "Anteil": since_counts.values})
-fig_since = px.bar(df_since, x="Kategorie", y="Anteil", text=[f"{v:.0%}" for v in df_since["Anteil"]])
-fig_since.update_layout(xaxis_title="", yaxis_tickformat=".0%", font=FONT)
-st.plotly_chart(fig_since, use_container_width=True)
+abs_since = df[since_col].value_counts().sort_index()
+frage_since = clean_question(since_col)
+df_since = pd.DataFrame({"Antwort": since_counts.index, "Anteil": since_counts.values, "Absolut": abs_since.values})
+df_since["Prozent"] = (df_since["Anteil"] * 100).round(1).astype(str) + "%"
+diagram_with_stats(df_since, frage_since, is_likert=False)
 
-st.header("Wie häufig nutzt du Copilot/ChatGPT?")
 freq_counts = df[freq_col].value_counts(normalize=True).sort_index()
-df_freq = pd.DataFrame({"Häufigkeit": freq_counts.index, "Anteil": freq_counts.values})
-fig_freq = px.bar(df_freq, x="Häufigkeit", y="Anteil", text=[f"{v:.0%}" for v in df_freq["Anteil"]])
-fig_freq.update_layout(xaxis_title="", yaxis_tickformat=".0%", font=FONT)
-st.plotly_chart(fig_freq, use_container_width=True)
+abs_freq = df[freq_col].value_counts().sort_index()
+frage_freq = clean_question(freq_col)
+df_freq = pd.DataFrame({"Antwort": freq_counts.index, "Anteil": freq_counts.values, "Absolut": abs_freq.values})
+df_freq["Prozent"] = (df_freq["Anteil"] * 100).round(1).astype(str) + "%"
+diagram_with_stats(df_freq, frage_freq, is_likert=False)
 
-st.header("Wie bewertest du insgesamt den Einsatz von KI-Coding-Assistenten?")
 rate_counts = df[rate_col].value_counts(normalize=True).sort_index()
-df_rate = pd.DataFrame({"Bewertung": rate_counts.index, "Anteil": rate_counts.values})
-fig_rate = px.bar(df_rate, x="Bewertung", y="Anteil", text=[f"{v:.0%}" for v in df_rate["Anteil"]])
-fig_rate.update_layout(xaxis_title="", yaxis_tickformat=".0%", font=FONT)
-st.plotly_chart(fig_rate, use_container_width=True)
+abs_rate = df[rate_col].value_counts().sort_index()
+frage_rate = clean_question(rate_col)
+df_rate = pd.DataFrame({"Antwort": rate_counts.index, "Anteil": rate_counts.values, "Absolut": abs_rate.values})
+df_rate["Prozent"] = (df_rate["Anteil"] * 100).round(1).astype(str) + "%"
+diagram_with_stats(df_rate, frage_rate, is_likert=False)
 
-st.header("Für welche Aufgaben setzt du es hauptsächlich ein?")
 task_cols = [c for c in df.columns if c.startswith("Für welche Aufgaben setzt du")]
 if task_cols:
     nums = df[task_cols].apply(pd.to_numeric, errors="coerce").fillna(0).sum()
-    df_task = pd.DataFrame({"Aufgabe": [clean_label(c) for c in task_cols], "Anteil": nums.values / len(df)})
-    fig_task = px.bar(df_task, x="Aufgabe", y="Anteil", text=[f"{v:.0%}" for v in df_task["Anteil"]])
-    fig_task.update_layout(xaxis_title="", yaxis_tickformat=".0%", font=FONT, xaxis_tickangle=-20)
-    st.plotly_chart(fig_task, use_container_width=True)
+    frage_task = clean_question(task_cols[0])
+    df_task = pd.DataFrame({"Antwort": [clean_label(c) for c in task_cols], "Absolut": nums.values})
+    df_task["Anteil"] = df_task["Absolut"] / len(df)
+    df_task["Prozent"] = (df_task["Anteil"] * 100).round(1).astype(str) + "%"
+    diagram_with_stats(df_task, frage_task, is_likert=False)
 
-st.header("Wahrnehmung von Copilot im Arbeitsalltag")
+def extract_parenthesis_or_clean(col):
+    m = re.search(r"\(([^)]+)\)", col)
+    if col.startswith("Wahrnehmung von Copilot im Arbeitsalltag") and m:
+        return m.group(1).strip()
+    return clean_question(col)
+
 for col in df.columns:
     if col.startswith("Wahrnehmung von Copilot"):
+        frage = extract_parenthesis_or_clean(col)
         pct = df[col].map(likert_map).value_counts(normalize=True).sort_index()
-        df_lik = pd.DataFrame({"Antwort": [inv_map[i] for i in pct.index], "Anteil": pct.values})
-        fig = px.bar(df_lik, x="Antwort", y="Anteil", text=[f"{v:.0%}" for v in df_lik["Anteil"]])
-        fig.update_layout(xaxis_title="", yaxis_tickformat=".0%", font=FONT)
-        st.plotly_chart(fig, use_container_width=True)
+        abs_values = df[col].map(likert_map).value_counts().sort_index()
+        df_lik = pd.DataFrame({
+            "Antwort": [inv_map[i] for i in pct.index],
+            "Anteil": pct.values,
+            "Absolut": abs_values.values,
+        })
+        df_lik["Prozent"] = (df_lik["Anteil"] * 100).round(1).astype(str) + "%"
+        diagram_with_stats(df_lik, frage, positiv_labels, negativ_labels, is_likert=True)
 
 situ_col = next((c for c in df.columns if "In welchen Situationen" in c and "Freitext" in c), None)
 if situ_col:
     st.header("In welchen Situationen ist Copilot besonders hilfreich?")
-    for a in df[situ_col].dropna().unique():
-        st.write("•", a)
+    situ_frei = df.loc[~df[situ_col].isna(), ["Teilnehmer", situ_col]]
+    for i, row in situ_frei.iterrows():
+        st.markdown(f'<div title="Teilnehmer: {row.Teilnehmer}">• {row[situ_col]}</div>', unsafe_allow_html=True)
 
-st.header("Wie zuverlässig findest du den vorgeschlagenen Code allgemein?")
 rel_col = [c for c in df.columns if "Wie zuverlässig findest" in c][0]
 order_rel = ["ungenügend","mangelhaft","ausreichend","befriedigend","gut","sehr gut"]
+note_map = {"ungenügend":6, "mangelhaft":5, "ausreichend":4, "befriedigend":3, "gut":2, "sehr gut":1}
 rel_counts = df[rel_col].value_counts(normalize=True).reindex(order_rel).fillna(0)
-df_rel = pd.DataFrame({"Note": order_rel, "Anteil": rel_counts.values})
-fig_rel = px.bar(df_rel, x="Note", y="Anteil", text=[f"{v:.0%}" for v in df_rel["Anteil"]])
-fig_rel.update_layout(xaxis_title="", yaxis_tickformat=".0%", font=FONT)
-st.plotly_chart(fig_rel, use_container_width=True)
+abs_rel = df[rel_col].value_counts().reindex(order_rel).fillna(0)
+frage_rel = clean_question(rel_col)
+df_rel = pd.DataFrame({"Antwort": order_rel, "Anteil": rel_counts.values, "Absolut": abs_rel.values})
+df_rel["Prozent"] = (df_rel["Anteil"] * 100).round(1).astype(str) + "%"
+diagram_with_stats(df_rel, frage_rel, is_likert=False, note_map=note_map)
 
 edit_col = [c for c in df.columns if "Vorschläge nachbearbeiten" in c][0]
-st.header("Wie oft musst du Vorschläge nachbearbeiten?")
 edit_counts = df[edit_col].value_counts(normalize=True).sort_index()
-df_edit = pd.DataFrame({"Häufigkeit": edit_counts.index, "Anteil": edit_counts.values})
-fig_edit = px.bar(df_edit, x="Häufigkeit", y="Anteil", text=[f"{v:.0%}" for v in df_edit["Anteil"]])
-fig_edit.update_layout(xaxis_title="", yaxis_tickformat=".0%", font=FONT)
-st.plotly_chart(fig_edit, use_container_width=True)
+abs_edit = df[edit_col].value_counts().sort_index()
+frage_edit = clean_question(edit_col)
+df_edit = pd.DataFrame({"Antwort": edit_counts.index, "Anteil": edit_counts.values, "Absolut": abs_edit.values})
+df_edit["Prozent"] = (df_edit["Anteil"] * 100).round(1).astype(str) + "%"
+diagram_with_stats(df_edit, frage_edit, is_likert=False)
 
 err_col = [c for c in df.columns if "fehlerhaften oder riskanten Code" in c][0]
-st.header("Gab es fehlerhaften oder riskanten Code durch Copilot?")
 err_counts = df[err_col].value_counts(normalize=True).sort_index()
-df_err = pd.DataFrame({"Antwort": err_counts.index, "Anteil": err_counts.values})
-fig_err = px.bar(df_err, x="Antwort", y="Anteil", text=[f"{v:.0%}" for v in df_err["Anteil"]])
-fig_err.update_layout(xaxis_title="", yaxis_tickformat=".0%", font=FONT)
-st.plotly_chart(fig_err, use_container_width=True)
+abs_err = df[err_col].value_counts().sort_index()
+frage_err = clean_question(err_col)
+df_err = pd.DataFrame({"Antwort": err_counts.index, "Anteil": err_counts.values, "Absolut": abs_err.values})
+df_err["Prozent"] = (df_err["Anteil"] * 100).round(1).astype(str) + "%"
+diagram_with_stats(df_err, frage_err, is_likert=False)
 
 skip_col = [c for c in df.columns if "Verzichtest du bewusst" in c][0]
-st.header("Verzicht auf Copilot?")
 skip_counts = df[skip_col].value_counts(normalize=True).sort_index()
-df_skip = pd.DataFrame({"Antwort": skip_counts.index, "Anteil": skip_counts.values})
-fig_skip = px.bar(df_skip, x="Antwort", y="Anteil", text=[f"{v:.0%}" for v in df_skip["Anteil"]])
-fig_skip.update_layout(xaxis_title="", yaxis_tickformat=".0%", font=FONT)
-st.plotly_chart(fig_skip, use_container_width=True)
+abs_skip = df[skip_col].value_counts().sort_index()
+frage_skip = clean_question(skip_col)
+df_skip = pd.DataFrame({"Antwort": skip_counts.index, "Anteil": skip_counts.values, "Absolut": abs_skip.values})
+df_skip["Prozent"] = (df_skip["Anteil"] * 100).round(1).astype(str) + "%"
+diagram_with_stats(df_skip, frage_skip, is_likert=False)
 
 cases_col = next((c for c in df.columns if c.strip()=="In welchen Fällen?"), None)
 if cases_col:
     st.header("In welchen Fällen?")
-    for a in df[cases_col].dropna().unique():
-        st.write("•", a)
+    cases_frei = df.loc[~df[cases_col].isna(), ["Teilnehmer", cases_col]]
+    for i, row in cases_frei.iterrows():
+        st.markdown(f'<div title="Teilnehmer: {row.Teilnehmer}">• {row[cases_col]}</div>', unsafe_allow_html=True)
 
 rec_col = [c for c in df.columns if "professionellen Umfeld empfehlen" in c][0]
-st.header("Empfehlung im professionellen Umfeld?")
 rec_counts = df[rec_col].value_counts(normalize=True).sort_index()
-df_rec = pd.DataFrame({"Antwort": rec_counts.index, "Anteil": rec_counts.values})
-fig_rec = px.bar(df_rec, x="Antwort", y="Anteil", text=[f"{v:.0%}" for v in df_rec["Anteil"]])
-fig_rec.update_layout(xaxis_title="", yaxis_tickformat=".0%", font=FONT)
-st.plotly_chart(fig_rec, use_container_width=True)
+abs_rec = df[rec_col].value_counts().sort_index()
+frage_rec = clean_question(rec_col)
+df_rec = pd.DataFrame({"Antwort": rec_counts.index, "Anteil": rec_counts.values, "Absolut": abs_rec.values})
+df_rec["Prozent"] = (df_rec["Anteil"] * 100).round(1).astype(str) + "%"
+diagram_with_stats(df_rec, frage_rec, is_likert=False)
 
 limit_col = next((c for c in df.columns if "Wie würdest du den Umgang einschränken" in c), None)
 if limit_col:
     st.header("Einschränkung des Einsatzes?")
-    for a in df[limit_col].dropna().unique():
-        st.write("•", a)
+    limit_frei = df.loc[~df[limit_col].isna(), ["Teilnehmer", limit_col]]
+    for i, row in limit_frei.iterrows():
+        st.markdown(f'<div title="Teilnehmer: {row.Teilnehmer}">• {row[limit_col]}</div>', unsafe_allow_html=True)
 
 risk_prefix = "Welche der folgenden Aspekte"
 risk_cols = [c for c in df.columns if c.startswith(risk_prefix) and re.search(r"\([^)]+\)$", c)]
 if risk_cols:
-    st.header("Risiken oder Hürden?")
+    frage_risk = clean_question([c for c in df.columns if c.startswith(risk_prefix)][0])
+    labels = [re.search(r"\(([^)]+)\)$", c).group(1) for c in risk_cols]
     nums = df[risk_cols].apply(lambda col: pd.to_numeric(col, errors="coerce")).fillna(0).sum()
     perc = nums / len(df)
-    labels = [re.search(r"\(([^)]+)\)$", c).group(1) for c in risk_cols]
-    df_risk = pd.DataFrame({"Aspekt": labels, "Anteil": perc.values})
-    fig_risk = px.bar(df_risk, x="Aspekt", y="Anteil", text=[f"{v:.0%}" for v in df_risk["Anteil"]])
-    fig_risk.update_layout(xaxis_title="", yaxis_tickformat=".0%", font=FONT, xaxis_tickangle=-20)
-    st.plotly_chart(fig_risk, use_container_width=True)
+    df_risk = pd.DataFrame({"Antwort": labels, "Anteil": perc.values, "Absolut": nums.values})
+    df_risk["Prozent"] = (df_risk["Anteil"] * 100).round(1).astype(str) + "%"
+    diagram_with_stats(df_risk, frage_risk, is_likert=False)
 
 risk_text_col = next((c for c in df.columns if "(Freitext)" in c and risk_prefix in c), None)
 if risk_text_col:
     st.subheader("Risiken/Hürden (Freitext)")
-    for a in df[risk_text_col].dropna().unique():
-        st.write("•", a)
+    risk_frei = df.loc[~df[risk_text_col].isna(), ["Teilnehmer", risk_text_col]]
+    for i, row in risk_frei.iterrows():
+        st.markdown(f'<div title="Teilnehmer: {row.Teilnehmer}">• {row[risk_text_col]}</div>', unsafe_allow_html=True)
 
 adv_col = [c for c in df.columns if "Welche Vorteile siehst du persönlich" in c][0]
 st.header("Welche Vorteile siehst du persönlich?")
-for a in df[adv_col].dropna().unique():
-    st.write("•", a)
+adv_frei = df.loc[~df[adv_col].isna(), ["Teilnehmer", adv_col]]
+for i, row in adv_frei.iterrows():
+    st.markdown(f'<div title="Teilnehmer: {row.Teilnehmer}">• {row[adv_col]}</div>', unsafe_allow_html=True)
 
 dis_col = [c for c in df.columns if "Welche Nachteile oder Probleme" in c][0]
 st.header("Welche Nachteile oder Probleme erlebtest du?")
-for a in df[dis_col].dropna().unique():
-    st.write("•", a)
+dis_frei = df.loc[~df[dis_col].isna(), ["Teilnehmer", dis_col]]
+for i, row in dis_frei.iterrows():
+    st.markdown(f'<div title="Teilnehmer: {row.Teilnehmer}">• {row[dis_col]}</div>', unsafe_allow_html=True)
